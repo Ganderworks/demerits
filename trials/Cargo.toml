@@ -1,0 +1,20 @@
+[package]
+name = "trials"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "The test levels for demerits. Not published."
+
+[dependencies]
+demerits = { path = ".." }
+
+# Each level turns on the ones below it. `default` is the level you're on:
+# move it up one when you pass.
+[features]
+default = ["easy"]
+easy = []
+medium = ["easy"]
+hard = ["medium"]
+very-hard = ["hard"]
+nitpicking = ["very-hard"]
+neptune = ["nitpicking"]

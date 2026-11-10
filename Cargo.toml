@@ -1,0 +1,18 @@
+[package]
+name = "demerits"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Deterministic Knuth–Plass line breaking"
+repository = "https://github.com/Ganderworks/demerits"
+keywords = ["typesetting", "line-breaking", "knuth-plass", "justification", "hyphenation"]
+categories = ["text-processing"]
+
+[dependencies]
+
+# The test levels live in `trials`, an unpublished crate, so the levels never
+# show up as features of demerits itself.
+[workspace]
+members = [".", "trials"]
+default-members = [".", "trials"]
