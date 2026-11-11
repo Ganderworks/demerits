@@ -45,6 +45,23 @@ an implementation: a line-by-line scorer, brute force over every set of breaks
 for small paragraphs, and an exhaustive dynamic program for bigger ones. The
 dynamic program is itself checked against brute force on every run.
 
+## Sketching in Python
+
+[`python/`](python) has the same interface in Python, for getting the
+algorithm right before writing it in Rust: a stub in `demerits.py`, and easy
+and medium ported to `unittest`, with the same judges and the same random
+paragraphs (the generator is the same SplitMix64, so a seed makes the same
+paragraph in both). It needs nothing but Python 3.10 or later.
+
+```sh
+python3 python/run.py           # the current level
+python3 python/run.py medium    # peek at the next
+```
+
+Raise `LEVEL` at the top of `python/run.py` when you pass. The Python
+differences from the contract (exceptions instead of `Err`, `INFINITE` for
+infinite stretch) are at the top of `demerits.py`.
+
 ## License
 
 MIT
