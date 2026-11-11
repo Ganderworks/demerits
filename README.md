@@ -7,9 +7,20 @@ whole paragraph and picks the breaks with the fewest total demerits, instead
 of filling each line greedily. The same input gives the same lines, bit for
 bit, on every platform.
 
+For when the best isn't needed, it also has two first-fit breakers, which
+fill each line as full as it will go and never fail:
+
+- `greedy` justifies: a line fits if its glue can shrink enough.
+- `ragged` doesn't: a line fits at its natural width, as in ragged-right text
+  or an editor wrapping lines.
+
+```rust
+let breaks = demerits::ragged(&items, &[line_width])?;
+```
+
 The full contract (integer widths, what counts as a break, how lines are
-measured, the adjustment ratio, demerits, looseness) is in the crate docs at
-the top of [`src/lib.rs`](src/lib.rs).
+measured, the adjustment ratio, demerits, looseness, first fit) is in the
+crate docs at the top of [`src/lib.rs`](src/lib.rs).
 
 ## The trials
 
@@ -40,10 +51,20 @@ cargo test -p trials --features hard
 
 A failing check prints Rust you can paste into a test to reproduce it.
 
+`greedy` and `ragged` are finished, so their trials, in
+[`tests/first_fit.rs`](trials/tests/first_fit.rs), aren't a level: they
+always run. To run only them:
+
+```sh
+cargo test -p trials --test first_fit
+```
+
 The judges in `trials/src/lib.rs` are written from the contract, not from
 an implementation: a line-by-line scorer, brute force over every set of breaks
 for small paragraphs, and an exhaustive dynamic program for bigger ones. The
-dynamic program is itself checked against brute force on every run.
+dynamic program is itself checked against brute force on every run. First fit
+is judged by a slow version that measures every line from scratch, and by
+first fit's promises checked line by line.
 
 ## Sketching in Python
 
