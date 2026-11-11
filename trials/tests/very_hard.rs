@@ -3,7 +3,7 @@
 
 use trials::*;
 
-fn run(seed: u64, cases: usize, mut make: impl FnMut(&mut Rng, usize) -> (Vec<Item>, Vec<f64>, Params)) {
+fn run(seed: u64, cases: usize, mut make: impl FnMut(&mut Rng, usize) -> (Vec<Item>, Vec<i64>, Params)) {
     let mut rng = Rng::new(seed);
     let (mut solved, mut infeasible, mut ambiguous) = (0, 0, 0);
     for case in 0..cases {
@@ -22,7 +22,7 @@ fn two_thousand_paragraphs() {
     run(1, 2000, |rng, case| {
         let shape = Shape { words: rng.int(15, 60) as usize, ..Shape::default() };
         let items = paragraph(rng, shape);
-        let widths = random_widths(rng, case % 4 == 0, false, 15.0, 40.0);
+        let widths = random_widths(rng, case % 4 == 0, false, 15, 40);
         let params = Params { tolerance: rng.pick(&[2.0, 3.0, 5.0, 10.0]), ..random_params(rng) };
         (items, widths, params)
     });
@@ -33,7 +33,7 @@ fn looseness_everywhere() {
     run(2, 800, |rng, case| {
         let shape = Shape { words: rng.int(15, 50) as usize, hyphens: 0.5, ..Shape::default() };
         let items = paragraph(rng, shape);
-        let widths = random_widths(rng, case % 3 == 0, false, 15.0, 35.0);
+        let widths = random_widths(rng, case % 3 == 0, false, 15, 35);
         let mut params = random_params(rng);
         params.tolerance = rng.pick(&[3.0, 5.0, 10.0]);
         params.looseness = rng.int(-3, 3) as i32;
@@ -46,7 +46,7 @@ fn long_paragraphs() {
     run(3, 25, |rng, case| {
         let shape = Shape { words: 400, hyphens: 0.4, penalties: 0.05, forced: 0.005, ..Shape::default() };
         let items = paragraph(rng, shape);
-        let widths = random_widths(rng, case % 2 == 0, false, 30.0, 70.0);
+        let widths = random_widths(rng, case % 2 == 0, false, 30, 70);
         let params = Params { tolerance: rng.pick(&[2.0, 3.0, 5.0]), ..random_params(rng) };
         (items, widths, params)
     });
@@ -59,7 +59,7 @@ fn narrow_columns() {
     for case in 0..400 {
         let shape = Shape { words: rng.int(10, 30) as usize, hyphens: 0.7, ..Shape::default() };
         let items = paragraph(&mut rng, shape);
-        let widths = random_widths(&mut rng, case % 2 == 0, false, 14.0, 20.0);
+        let widths = random_widths(&mut rng, case % 2 == 0, false, 14, 20);
         let params = Params { tolerance: rng.pick(&[2.0, 5.0, 10.0]), ..random_params(&mut rng) };
         match check(&items, &widths, &params) {
             Verdict::Infeasible => infeasible += 1,

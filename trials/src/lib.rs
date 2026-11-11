@@ -13,36 +13,45 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub use demerits::{Break, Error, INFINITY, Item, Params, break_lines};
+pub use demerits::{Break, Error, INFINITY, Item, Params, Stretch, break_lines};
 
 // ---------------------------------------------------------------------------
 // Building paragraphs
 
-pub fn bx(width: f64) -> Item {
+/// The width of one character in [`text`], and the unit the random
+/// paragraphs are measured in.
+pub const CH: i64 = 1000;
+
+pub fn bx(width: i64) -> Item {
     Item::Box { width }
 }
 
-pub fn glue(width: f64, stretch: f64, shrink: f64) -> Item {
-    Item::Glue { width, stretch, shrink }
+pub fn glue(width: i64, stretch: i64, shrink: i64) -> Item {
+    Item::Glue { width, stretch: Stretch::Finite(stretch), shrink }
 }
 
-pub fn penalty(width: f64, cost: f64, flagged: bool) -> Item {
+/// Glue that stretches without limit.
+pub fn infinite_glue(width: i64, shrink: i64) -> Item {
+    Item::Glue { width, stretch: Stretch::Infinite, shrink }
+}
+
+pub fn penalty(width: i64, cost: i64, flagged: bool) -> Item {
     Item::Penalty { width, cost, flagged }
 }
 
 /// A break that must happen.
 pub fn forced() -> Item {
-    penalty(0.0, -INFINITY, false)
+    penalty(0, -INFINITY, false)
 }
 
 /// A place that must not break.
 pub fn forbidden() -> Item {
-    penalty(0.0, INFINITY, false)
+    penalty(0, INFINITY, false)
 }
 
 /// Glue that stretches without limit (TeX's `\hfil`).
 pub fn fill() -> Item {
-    glue(0.0, f64::INFINITY, 0.0)
+    infinite_glue(0, 0)
 }
 
 /// End a paragraph the way TeX does: no break before the fill, the fill
@@ -51,13 +60,15 @@ pub fn finish(items: &mut Vec<Item>) {
     items.extend([forbidden(), fill(), forced()]);
 }
 
-/// The interword space `text` uses.
-pub const SPACE: Item = Item::Glue { width: 1.0, stretch: 0.5, shrink: 0.25 };
+/// The interword space `text` uses: one character wide, stretching by half
+/// that and shrinking by a quarter.
+pub const SPACE: Item = Item::Glue { width: CH, stretch: Stretch::Finite(CH / 2), shrink: CH / 4 };
 
-/// The hyphenation point `text` uses: a hyphen 1 wide, cost 50, flagged.
-pub const HYPHEN: Item = Item::Penalty { width: 1.0, cost: 50.0, flagged: true };
+/// The hyphenation point `text` uses: a hyphen one character wide, cost 50,
+/// flagged.
+pub const HYPHEN: Item = Item::Penalty { width: CH, cost: 50, flagged: true };
 
-/// Monospace text: every character is 1 wide, words are separated by
+/// Monospace text: every character is [`CH`] wide, words are separated by
 /// [`SPACE`], a `-` inside a word is a hyphenation point ([`HYPHEN`]), and a
 /// lone `/` ends a line (fill, then a forced break). The paragraph is
 /// finished with [`finish`] unless it already ends in a forced break.
@@ -77,7 +88,7 @@ pub fn text(s: &str) -> Vec<Item> {
             if i > 0 {
                 items.push(HYPHEN);
             }
-            items.push(bx(part.chars().count() as f64));
+            items.push(bx(part.chars().count() as i64 * CH));
         }
         after_word = true;
     }
@@ -159,28 +170,27 @@ pub fn line_start(items: &[Item], after: Option<usize>) -> usize {
     j
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Measure {
-    pub natural: f64,
+    pub natural: i64,
     /// The finite stretch only.
-    pub stretch: f64,
+    pub stretch: i64,
     /// Whether any glue in the line stretches without limit.
     pub infinite: bool,
-    pub shrink: f64,
+    pub shrink: i64,
 }
 
 /// Measure the line `start..end` that breaks at `end`.
 pub fn measure(items: &[Item], start: usize, end: usize) -> Measure {
-    let mut m = Measure { natural: 0.0, stretch: 0.0, infinite: false, shrink: 0.0 };
+    let mut m = Measure { natural: 0, stretch: 0, infinite: false, shrink: 0 };
     for item in &items[start..end] {
         match *item {
             Item::Box { width } => m.natural += width,
             Item::Glue { width, stretch, shrink } => {
                 m.natural += width;
-                if stretch == f64::INFINITY {
-                    m.infinite = true;
-                } else {
-                    m.stretch += stretch;
+                match stretch {
+                    Stretch::Finite(y) => m.stretch += y,
+                    Stretch::Infinite => m.infinite = true,
                 }
                 m.shrink += shrink;
             }
@@ -193,17 +203,17 @@ pub fn measure(items: &[Item], start: usize, end: usize) -> Measure {
     m
 }
 
-pub fn ratio(m: Measure, width: f64) -> f64 {
+pub fn ratio(m: Measure, width: i64) -> f64 {
     if m.natural < width {
         if m.infinite {
             0.0
-        } else if m.stretch > 0.0 {
-            (width - m.natural) / m.stretch
+        } else if m.stretch > 0 {
+            (width - m.natural) as f64 / m.stretch as f64
         } else {
             f64::INFINITY
         }
     } else if m.natural > width {
-        if m.shrink > 0.0 { (width - m.natural) / m.shrink } else { f64::NEG_INFINITY }
+        if m.shrink > 0 { (width - m.natural) as f64 / m.shrink as f64 } else { f64::NEG_INFINITY }
     } else {
         0.0
     }
@@ -231,7 +241,7 @@ pub fn badness(r: f64) -> f64 {
     100.0 * a * a * a
 }
 
-pub fn line_width(widths: &[f64], k: usize) -> f64 {
+pub fn line_width(widths: &[i64], k: usize) -> i64 {
     widths[k.min(widths.len() - 1)]
 }
 
@@ -246,12 +256,12 @@ pub fn line_demerits(
     let base = params.line_penalty + badness(r);
     let base = base * base;
     let p = match *end {
-        Item::Penalty { cost, .. } => cost,
+        Item::Penalty { cost, .. } => cost as f64,
         _ => 0.0,
     };
     let mut d = if p >= 0.0 {
         base + p * p
-    } else if p > -INFINITY {
+    } else if p > -INFINITY as f64 {
         base - p * p
     } else {
         base
@@ -275,7 +285,7 @@ pub struct Evaluation {
 /// Score a set of breaks, or say exactly which rule it breaks.
 pub fn evaluate(
     items: &[Item],
-    widths: &[f64],
+    widths: &[i64],
     params: &Params,
     breaks: &[usize],
 ) -> Result<Evaluation, String> {
@@ -336,25 +346,24 @@ pub fn evaluate(
 /// the contract gives.
 pub fn validate(
     items: &[Item],
-    widths: &[f64],
+    widths: &[i64],
     params: &Params,
     breaks: &[Break],
 ) -> Result<Evaluation, String> {
     let positions: Vec<usize> = breaks.iter().map(|b| b.position).collect();
     let ev = evaluate(items, widths, params, &positions)?;
     for (k, (got, want)) in breaks.iter().map(|b| b.ratio).zip(&ev.ratios).enumerate() {
-        if !got.is_finite() || !close_abs(got, *want) {
-            return Err(format!("line {k} reports ratio {got}, but its ratio is {want}"));
+        // Exactly: the contract says how to compute it.
+        if got != *want {
+            return Err(format!("line {k} reports ratio {got:?}, but its ratio is {want:?}"));
         }
     }
     Ok(ev)
 }
 
+/// Demerits are sums of many lines, and the order you add them in is yours,
+/// so they're compared to a relative 1e-9.
 pub fn close(a: f64, b: f64) -> bool {
-    (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0)
-}
-
-fn close_abs(a: f64, b: f64) -> bool {
     (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0)
 }
 
@@ -364,18 +373,18 @@ pub fn right_monotone(items: &[Item]) -> bool {
     let breaks: Vec<usize> = (0..items.len()).filter(|&i| is_legal_break(items, i)).collect();
     let pen = |i: usize| match items[i] {
         Item::Penalty { width, .. } => width,
-        _ => 0.0,
+        _ => 0,
     };
     breaks.windows(2).all(|w| {
-        let between: f64 = items[w[0]..w[1]]
+        let between: i64 = items[w[0]..w[1]]
             .iter()
             .map(|it| match *it {
                 Item::Box { width } => width,
                 Item::Glue { width, shrink, .. } => width - shrink,
-                Item::Penalty { .. } => 0.0,
+                Item::Penalty { .. } => 0,
             })
             .sum();
-        between - pen(w[0]) + pen(w[1]) >= 0.0
+        between - pen(w[0]) + pen(w[1]) >= 0
     })
 }
 
@@ -416,7 +425,7 @@ pub fn select(counts: &BTreeMap<usize, f64>, looseness: i32) -> Expected {
 }
 
 /// Try every set of breaks. Small paragraphs only.
-pub fn brute_force(items: &[Item], widths: &[f64], params: &Params) -> Expected {
+pub fn brute_force(items: &[Item], widths: &[i64], params: &Params) -> Expected {
     let n = items.len();
     let mandatory: Vec<usize> = (0..n).filter(|&i| is_forced(&items[i])).collect();
     let optional: Vec<usize> = (0..n).filter(|&i| is_legal_break(items, i) && !is_forced(&items[i])).collect();
@@ -438,7 +447,7 @@ pub fn brute_force(items: &[Item], widths: &[f64], params: &Params) -> Expected 
 
 /// An exhaustive dynamic program: the fewest demerits for every reachable
 /// (break, fitness class, line count). Exact for any input.
-pub fn oracle(items: &[Item], widths: &[f64], params: &Params) -> Expected {
+pub fn oracle(items: &[Item], widths: &[i64], params: &Params) -> Expected {
     assert!(items.last().is_some_and(is_forced), "the oracle needs a terminated paragraph");
     let n = items.len();
     let breaks: Vec<usize> = (0..n).filter(|&i| is_legal_break(items, i)).collect();
@@ -449,11 +458,11 @@ pub fn oracle(items: &[Item], widths: &[f64], params: &Params) -> Expected {
     // Moving a line's start earlier only adds width when nothing has a
     // negative (width - shrink); then an overfull line stays overfull.
     let prunable = items.iter().all(|it| match *it {
-        Item::Box { width } => width >= 0.0,
-        Item::Glue { width, shrink, .. } => width - shrink >= 0.0,
+        Item::Box { width } => width >= 0,
+        Item::Glue { width, shrink, .. } => width - shrink >= 0,
         Item::Penalty { .. } => true,
     });
-    let widest = widths.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let widest = widths.iter().copied().max().unwrap_or(i64::MIN);
 
     // states[0] is the paragraph's start; states[j + 1] is breaks[j].
     let mut states: Vec<BTreeMap<(u8, usize), f64>> = vec![BTreeMap::new(); breaks.len() + 1];
@@ -502,7 +511,7 @@ pub fn oracle(items: &[Item], widths: &[f64], params: &Params) -> Expected {
 
 /// First fit: each line takes as much as it can without being overfull.
 /// What most text engines do. Its lines may well be infeasible.
-pub fn greedy(items: &[Item], widths: &[f64]) -> Vec<usize> {
+pub fn greedy(items: &[Item], widths: &[i64]) -> Vec<usize> {
     let mut out = Vec::new();
     let mut previous = None;
     loop {
@@ -544,16 +553,16 @@ pub enum Verdict {
 }
 
 /// Run `break_lines` and hold it to the dynamic-programming oracle.
-pub fn check(items: &[Item], widths: &[f64], params: &Params) -> Verdict {
+pub fn check(items: &[Item], widths: &[i64], params: &Params) -> Verdict {
     judge(items, widths, params, oracle(items, widths, params))
 }
 
 /// Run `break_lines` and hold it to brute force.
-pub fn check_brute(items: &[Item], widths: &[f64], params: &Params) -> Verdict {
+pub fn check_brute(items: &[Item], widths: &[i64], params: &Params) -> Verdict {
     judge(items, widths, params, brute_force(items, widths, params))
 }
 
-fn judge(items: &[Item], widths: &[f64], params: &Params, want: Expected) -> Verdict {
+fn judge(items: &[Item], widths: &[i64], params: &Params, want: Expected) -> Verdict {
     let got = break_lines(items, widths, params);
     let ctx = || repro(items, widths, params);
     match (got, want) {
@@ -594,16 +603,17 @@ fn judge(items: &[Item], widths: &[f64], params: &Params, want: Expected) -> Ver
 }
 
 /// Rust you can paste into a test to reproduce a failure.
-pub fn repro(items: &[Item], widths: &[f64], params: &Params) -> String {
+pub fn repro(items: &[Item], widths: &[i64], params: &Params) -> String {
     fn num(x: f64) -> String {
-        if x == f64::INFINITY {
-            "f64::INFINITY".into()
-        } else if x == INFINITY {
-            "INFINITY".into()
-        } else if x == -INFINITY {
-            "-INFINITY".into()
-        } else {
-            format!("{x:?}")
+        if x == f64::INFINITY { "f64::INFINITY".into() } else { format!("{x:?}") }
+    }
+    fn int(x: i64) -> String {
+        match x {
+            i64::MIN => "i64::MIN".into(),
+            i64::MAX => "i64::MAX".into(),
+            INFINITY => "INFINITY".into(),
+            _ if x == -INFINITY => "-INFINITY".into(),
+            _ => x.to_string(),
         }
     }
     let mut s = String::from("to reproduce:\n    let items = vec![");
@@ -612,14 +622,19 @@ pub fn repro(items: &[Item], widths: &[f64], params: &Params) -> String {
     } else {
         for it in items {
             s += &match *it {
-                Item::Box { width } => format!("bx({}), ", num(width)),
-                Item::Glue { width, stretch, shrink } => format!("glue({}, {}, {}), ", num(width), num(stretch), num(shrink)),
-                Item::Penalty { width, cost, flagged } => format!("penalty({}, {}, {flagged}), ", num(width), num(cost)),
+                Item::Box { width } => format!("bx({}), ", int(width)),
+                Item::Glue { width, stretch: Stretch::Finite(y), shrink } => {
+                    format!("glue({}, {}, {}), ", int(width), int(y), int(shrink))
+                }
+                Item::Glue { width, stretch: Stretch::Infinite, shrink } => {
+                    format!("infinite_glue({}, {}), ", int(width), int(shrink))
+                }
+                Item::Penalty { width, cost, flagged } => format!("penalty({}, {}, {flagged}), ", int(width), int(cost)),
             };
         }
     }
     s += "];\n";
-    let ws: Vec<String> = widths.iter().map(|w| num(*w)).collect();
+    let ws: Vec<String> = widths.iter().map(|w| int(*w)).collect();
     s += &format!("    let widths = [{}];\n", ws.join(", "));
     s += &format!(
         "    let params = Params {{ tolerance: {}, line_penalty: {}, flagged_demerits: {}, fitness_demerits: {}, looseness: {} }};\n",
@@ -720,8 +735,9 @@ pub struct Shape {
     pub fills: bool,
     /// Chance of a negative kern inside a fragment.
     pub kerns: f64,
-    /// Widths in halves and stretch and shrink of 0.5, 1 or 2, so ratios land
-    /// exactly on the class and tolerance boundaries, and ties are common.
+    /// Widths in half characters and stretch and shrink of a quarter, a half,
+    /// one or two characters, so ratios land exactly on the class and
+    /// tolerance boundaries, and ties are common.
     pub dyadic: bool,
 }
 
@@ -737,12 +753,12 @@ pub fn paragraph(rng: &mut Rng, shape: Shape) -> Vec<Item> {
     for w in 0..shape.words {
         if space_next {
             if rng.chance(shape.penalties) {
-                items.push(penalty(0.0, rng.int(-200, 300) as f64, false));
+                items.push(penalty(0, rng.int(-200, 300), false));
             }
             items.push(if shape.dyadic {
-                glue(1.0, rng.pick(&[0.5, 1.0, 2.0]), rng.pick(&[0.25, 0.5, 1.0]))
+                glue(CH, rng.pick(&[CH / 2, CH, 2 * CH]), rng.pick(&[CH / 4, CH / 2, CH]))
             } else {
-                glue(rng.range(0.8, 1.2), rng.range(0.2, 1.0), rng.range(0.1, 0.5))
+                glue(rng.int(800, 1200), rng.int(200, 1000), rng.int(100, 500))
             });
         }
         let fragments = if rng.chance(shape.hyphens) { rng.int(2, 3) } else { 1 };
@@ -750,12 +766,12 @@ pub fn paragraph(rng: &mut Rng, shape: Shape) -> Vec<Item> {
             if f > 0 {
                 items.push(HYPHEN);
             }
-            let width = if shape.dyadic { rng.int(3, 12) as f64 / 2.0 } else { rng.range(1.5, 6.0) };
+            let width = if shape.dyadic { rng.int(3, 12) * CH / 2 } else { rng.int(1500, 6000) };
             if rng.chance(shape.kerns) {
                 // A kern inside the fragment; the fragment's net width stays
-                // at least 1.2, wider than a hyphen.
-                let kern = rng.range(0.05, 0.3);
-                let left = rng.range(0.5, width - 0.5);
+                // at least 1.2 characters, wider than a hyphen.
+                let kern = rng.int(50, 300);
+                let left = rng.int(500, width - 500);
                 items.extend([bx(left), bx(-kern), bx(width - left)]);
             } else {
                 items.push(bx(width));
@@ -785,17 +801,12 @@ pub fn random_params(rng: &mut Rng) -> Params {
     }
 }
 
-/// One line width between `lo` and `hi`, or (with `parshape`) one to four.
-pub fn random_widths(rng: &mut Rng, parshape: bool, dyadic: bool, lo: f64, hi: f64) -> Vec<f64> {
+/// One line width between `lo` and `hi` characters, or (with `parshape`) one
+/// to four.
+pub fn random_widths(rng: &mut Rng, parshape: bool, dyadic: bool, lo: i64, hi: i64) -> Vec<i64> {
     let count = if parshape { rng.int(1, 4) as usize } else { 1 };
     (0..count)
-        .map(|_| {
-            if dyadic {
-                rng.int((lo * 2.0) as i64, (hi * 2.0) as i64) as f64 / 2.0
-            } else {
-                rng.range(lo, hi)
-            }
-        })
+        .map(|_| if dyadic { rng.int(lo * 2, hi * 2) * CH / 2 } else { rng.int(lo * CH, hi * CH) })
         .collect()
 }
 
@@ -825,7 +836,7 @@ mod tests {
             if (0..items.len()).filter(|&i| is_legal_break(&items, i) && !is_forced(&items[i])).count() > 16 {
                 continue;
             }
-            let widths = random_widths(&mut rng, case % 4 == 0, dyadic, 6.0, 20.0);
+            let widths = random_widths(&mut rng, case % 4 == 0, dyadic, 6, 20);
             let mut params = random_params(&mut rng);
             params.looseness = if case % 6 == 0 { rng.int(-2, 2) as i32 } else { 0 };
             let a = oracle(&items, &widths, &params);
@@ -854,7 +865,7 @@ mod tests {
         let items = text("ab c-de /");
         assert_eq!(
             items,
-            vec![bx(2.0), SPACE, bx(1.0), HYPHEN, bx(2.0), forbidden(), fill(), forced()]
+            vec![bx(2 * CH), SPACE, bx(CH), HYPHEN, bx(2 * CH), forbidden(), fill(), forced()]
         );
         assert_eq!(hyphenate("restless creation"), "res-tle-ss cre-ati-on");
     }

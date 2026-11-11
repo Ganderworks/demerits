@@ -7,9 +7,9 @@ whole paragraph and picks the breaks with the fewest total demerits, instead
 of filling each line greedily. The same input gives the same lines, bit for
 bit, on every platform.
 
-The full contract (what counts as a break, how lines are measured, the
-adjustment ratio, demerits, looseness) is in the crate docs at the top of
-[`src/lib.rs`](src/lib.rs).
+The full contract (integer widths, what counts as a break, how lines are
+measured, the adjustment ratio, demerits, looseness) is in the crate docs at
+the top of [`src/lib.rs`](src/lib.rs).
 
 ## The trials
 

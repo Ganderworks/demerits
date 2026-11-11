@@ -8,6 +8,18 @@
 //!
 //! The tests in `trials/` hold the implementation to every rule below.
 //!
+//! ## Numbers
+//!
+//! Widths, stretch, shrink, line widths and penalty costs are integers
+//! (`i64`) in whatever unit you like: font units, TeX's scaled points,
+//! thousandths of an em. Sums of them are exact, so `L == W` means what it
+//! says. The caller promises that no sum of widths, stretches or shrinks
+//! over part of the paragraph, and no line width minus such a sum, overflows
+//! `i64`.
+//!
+//! Everything computed from them (the adjustment ratio, badness, demerits)
+//! is `f64`, as are the [`Params`].
+//!
 //! ## Where a line may break
 //!
 //! - At a **penalty** whose `cost` is below [`INFINITY`]. A penalty whose cost
@@ -42,11 +54,15 @@
 //! With `W` the line's width:
 //!
 //! - `L == W`: `r = 0`.
-//! - `L < W`: if any glue in the line has infinite stretch, `r = 0` (the
-//!   infinite glue takes up the slack). Otherwise `r = (W - L) / Y` if
-//!   `Y > 0`, else `+∞`.
+//! - `L < W`: if any glue in the line has [`Stretch::Infinite`], `r = 0`
+//!   (the infinite glue takes up the slack). Otherwise `r = (W - L) / Y` if
+//!   `Y > 0`, else `+∞`. `Y` is the finite stretch only.
 //! - `L > W`: `r = (W - L) / Z` if `Z > 0`, else `-∞`. Infinite stretch
 //!   doesn't help a line that's too long.
+//!
+//! The division is exactly this: `W - L` and `Y` (or `Z`) computed in
+//! `i64`, each converted to `f64`, then one `f64` division. Ratios are
+//! checked bit for bit.
 //!
 //! A line is **feasible** if `r` is finite and `-1 <= r <= tolerance`. An
 //! infinite ratio is never feasible, whatever the tolerance.
@@ -54,7 +70,7 @@
 //! ## Demerits
 //!
 //! Badness is `β = 100 |r|³`. With `l` the line penalty and `p` the cost of the
-//! penalty broken at (`0` for glue), a line's demerits are:
+//! penalty broken at (`0` for glue) as an `f64`, a line's demerits are:
 //!
 //! - `(l + β)² + p²` if `p >= 0`,
 //! - `(l + β)² - p²` if `-INFINITY < p < 0`,
@@ -92,25 +108,37 @@
 //! ## Determinism
 //!
 //! The same items, line widths and parameters give the same breaks and the
-//! same ratios, bit for bit, every time. Scaling every width by a power of two
-//! changes nothing but the scale.
+//! same ratios, bit for bit, every time. Multiplying every width, stretch,
+//! shrink and line width by the same positive integer changes nothing at all,
+//! as long as nothing overflows and every sum stays within `2^53` (past that,
+//! `f64` can't hold every integer; powers of two are still exact).
 
 #![forbid(unsafe_code)]
 
 /// A penalty `cost` at or above this never breaks; at or below its negative,
 /// always breaks.
-pub const INFINITY: f64 = 10_000.0;
+pub const INFINITY: i64 = 10_000;
 
 /// One element of a paragraph.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Item {
     /// Something with a fixed width: a word, a syllable, a kern.
-    Box { width: f64 },
-    /// Space that can stretch and shrink. `stretch` may be `f64::INFINITY`.
-    Glue { width: f64, stretch: f64, shrink: f64 },
+    Box { width: i64 },
+    /// Space that can stretch and shrink.
+    Glue { width: i64, stretch: Stretch, shrink: i64 },
     /// A possible break. `width` is only used if the line breaks here
     /// (a hyphen, say). `flagged` marks hyphen-like breaks.
-    Penalty { width: f64, cost: f64, flagged: bool },
+    Penalty { width: i64, cost: i64, flagged: bool },
+}
+
+/// How far a piece of glue can stretch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Stretch {
+    /// Up to this much at a ratio of 1.
+    Finite(i64),
+    /// Without limit, like TeX's `\hfil`. A line with any of it never has a
+    /// positive ratio.
+    Infinite,
 }
 
 /// How to judge a paragraph.
@@ -170,7 +198,7 @@ pub enum Error {
 /// If `line_widths` is empty and `items` isn't.
 pub fn break_lines(
     items: &[Item],
-    line_widths: &[f64],
+    line_widths: &[i64],
     params: &Params,
 ) -> Result<Vec<Break>, Error> {
     let _ = (items, line_widths, params);
