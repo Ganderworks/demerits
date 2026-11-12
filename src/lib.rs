@@ -125,10 +125,18 @@ pub enum Item {
     /// Something with a fixed width: a word, a syllable, a kern.
     Box { width: i64 },
     /// Space that can stretch and shrink.
-    Glue { width: i64, stretch: Stretch, shrink: i64 },
+    Glue {
+        width: i64,
+        stretch: Stretch,
+        shrink: i64,
+    },
     /// A possible break. `width` is only used if the line breaks here
     /// (a hyphen, say). `flagged` marks hyphen-like breaks.
-    Penalty { width: i64, cost: i64, flagged: bool },
+    Penalty {
+        width: i64,
+        cost: i64,
+        flagged: bool,
+    },
 }
 
 /// How far a piece of glue can stretch.
@@ -145,6 +153,7 @@ pub enum Stretch {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Params {
     /// The largest adjustment ratio a line may have.
+    /// This is ρ in the Knuth-Plass algorithm
     pub tolerance: f64,
     /// Added to every line's badness before squaring: the paper's `l`.
     pub line_penalty: f64,
@@ -154,6 +163,9 @@ pub struct Params {
     /// one: the paper's γ.
     pub fitness_demerits: f64,
     /// `0` for the optimum; `+1` asks for one more line, `-1` for one fewer.
+    /// This is param 'q' in the Knuth-Plass Algorithm- if nonzero it will search
+    /// for a solution at k+q lines, moving 1 closer to zero until a solution is
+    /// found. If no solution is found, an Infeasible Error is thrown.
     pub looseness: i32,
 }
 
@@ -188,19 +200,35 @@ pub enum Error {
     Unterminated,
 }
 
-/// Break a paragraph into lines.
-///
-/// Returns one [`Break`] per line, in order; the last is the paragraph's
-/// final forced break. An empty paragraph has no lines.
-///
-/// # Panics
-///
-/// If `line_widths` is empty and `items` isn't.
-pub fn break_lines(
-    items: &[Item],
-    line_widths: &[i64],
-    params: &Params,
-) -> Result<Vec<Break>, Error> {
-    let _ = (items, line_widths, params);
-    todo!("this one's yours")
+pub struct Node {}
+
+pub trait LineBreaker {
+    fn break_lines(&self, items: &[Item], line_widths: &[i64]) -> Result<Vec<Break>, Error>;
 }
+
+pub struct Optimal {
+    pub params: Params,
+} // Knuth–Plass
+pub struct Greedy; // justified
+pub struct Ragged; // not justified
+
+impl LineBreaker for Optimal {
+    fn break_lines(&self, items: &[Item], line_widths: &[i64]) -> Result<Vec<Break>, Error> {
+        demerits::break_lines(items, line_widths, &self.params)
+    }
+}
+
+impl LineBreaker for Greedy {
+    fn break_lines(&self, items: &[Item], line_widths: &[i64]) -> Result<Vec<Break>, Error> {
+        greedy::break_lines(items, line_widths);
+    }
+}
+
+mod demerits;
+pub use demerits::break_lines;
+
+mod greedy;
+pub use greedy::break_lines;
+
+mod ragged;
+pub use ragged::break_lines;
