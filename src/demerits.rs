@@ -1,6 +1,6 @@
 use std::range;
 
-use crate::{Break, Error, Item, Params, Result, Stretch};
+use crate::{Break, Error, Item, Params, Stretch};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Fitness {
@@ -43,7 +43,7 @@ pub fn break_lines(
     line_widths: &[i64],
     params: &Params,
 ) -> Result<Vec<Break>, Error> {
-    let _ = (items, line_widths, params);
+    let mut nodes = Lists::new();
     let mut A: &Node = &Node {
         position: 0,
         line: 0,
@@ -60,11 +60,8 @@ pub fn break_lines(
     let mut sum_stretch: i64 = 0; // finite stretch only
     let mut sum_infinite: i64 = 0; // count of infinite-stretch glues
     let mut sum_shrink: i64 = 0;
-    let i_vec: Vec<Item> = items.to_vec();
-    // NOTE: b from paper is "leader" here.
-    for leader in i_vec.iter() {}
-    let mut last_item: &Item;
-    for item in items.iter() {
+    // NOTE: b from paper is `i` here.
+    for (i, item) in items.iter().enumerate() {
         match *item {
             Item::Box { width } => sum_width += width,
             Item::Glue {
@@ -73,9 +70,8 @@ pub fn break_lines(
                 shrink,
             } => {
                 // TODO: unuglify
-                match *last_item {
-                    Item::Box { width } => main_loop(),
-                    _ => {}
+                if i > 0 && matches!(items[i - 1], Item::Box { .. }) {
+                    main_loop(&nodes)
                 }
                 sum_width += width;
                 // NOTE: we only need to store the latest infinite stretch.
@@ -91,9 +87,9 @@ pub fn break_lines(
                 cost,
                 flagged,
             } => {
-                if cost != NEG_INF {
-                    last_item = item;
-                    main_loop();
+                // Legal break unless the cost is +INF or more; forced ones too.
+                if cost < INF {
+                    main_loop(&nodes);
                 }
             }
         }
@@ -101,7 +97,7 @@ pub fn break_lines(
     todo!("return something")
 }
 
-fn main_loop() {
+fn main_loop(nodes: &Lists) {
     let mut next_a: &Node;
 
     loop {

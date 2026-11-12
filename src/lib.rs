@@ -274,17 +274,5 @@ impl LineBreaker for Optimal {
     }
 }
 
-impl LineBreaker for Greedy {
-    fn break_lines(&self, items: &[Item], line_widths: &[i64]) -> Result<Vec<Break>, Error> {
-        greedy::break_lines(items, line_widths);
-    }
-}
-
 mod demerits;
 pub use demerits::break_lines;
-
-mod greedy;
-pub use greedy::break_lines;
-
-mod ragged;
-pub use ragged::break_lines;
