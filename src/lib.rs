@@ -4,6 +4,11 @@
 //! Knuth and Plass, *Breaking Paragraphs into Lines* (1981). [`break_lines`]
 //! picks the breaks that give the whole paragraph the fewest total demerits.
 //!
+//! Two first-fit breakers come with it, for when the best isn't needed:
+//! [`greedy`] fills each justified line as full as it will shrink, and
+//! [`ragged`] fills each unjustified line as full as it will go at its
+//! natural width. Neither ever fails on a paragraph that ends properly.
+//!
 //! # The contract
 //!
 //! The tests in `trials/` hold the implementation to every rule below.
@@ -112,8 +117,59 @@
 //! shrink and line width by the same positive integer changes nothing at all,
 //! as long as nothing overflows and every sum stays within `2^53` (past that,
 //! `f64` can't hold every integer; powers of two are still exact).
+//!
+//! # First fit: [`greedy`] and [`ragged`]
+//!
+//! The two first-fit breakers follow the rules above for numbers, where a
+//! line may break, what a line contains, which width it gets, determinism and
+//! scaling. Demerits, tolerance and looseness don't apply; they take no
+//! [`Params`].
+//!
+//! ## Which break ends a line
+//!
+//! A line **fits** if it isn't too long:
+//!
+//! - for [`greedy`], if its adjustment ratio, computed exactly as above, is at
+//!   least `-1`: its glue can shrink enough. However loose a line is, even
+//!   `+∞`, it fits.
+//! - for [`ragged`], if its natural width `L` is at most `W`. Nothing
+//!   shrinks.
+//!
+//! Each line is filled in turn. Starting from the line's start, take the
+//! legal breaks it could end at, in order:
+//!
+//! - Stop at the first break where the line doesn't fit, and end the line at
+//!   the break before it.
+//! - Stop at a forced break where the line fits, and end the line there. (A
+//!   forced break where it doesn't fit is a break where it doesn't fit: the
+//!   line ends at the break before it, and the forced break ends the next
+//!   line, or a later one.)
+//! - If the line doesn't fit even at its first break (a word wider than the
+//!   column, say), the line ends there anyway, too long.
+//!
+//! A line never looks past the first break where it's too long, even if
+//! something further on (a negative kern) would bring it back within the
+//! width. Finite penalty costs and `flagged` make no difference.
+//!
+//! ## The answer
+//!
+//! One [`Break`] per line. [`greedy`] reports each line's adjustment ratio
+//! as above, whatever it is: below `-1` (or `-∞`) for a line that's too long,
+//! `+∞` for a short line with nothing to stretch. [`ragged`] sets every line
+//! at its natural width, so every ratio it reports is `0.0`.
+//!
+//! An empty paragraph has no lines. A paragraph that doesn't end with a
+//! forced break is [`Error::Unterminated`]. Nothing else is an error: neither
+//! breaker ever returns [`Error::Infeasible`].
+//!
+//! Both take time in proportion to the number of items, however long the
+//! lines, and don't recurse.
 
 #![forbid(unsafe_code)]
+
+mod first_fit;
+
+pub use first_fit::{greedy, ragged};
 
 /// A penalty `cost` at or above this never breaks; at or below its negative,
 /// always breaks.

@@ -1,5 +1,5 @@
 //! Helpers for the demerits test levels: paragraph builders, a scorer, two
-//! oracles, a greedy breaker and a seeded random generator.
+//! oracles, a first-fit oracle and a seeded random generator.
 //!
 //! Everything here is written from the contract in demerits' crate docs, not
 //! from an implementation. The scorer (`evaluate`) judges any set of breaks
@@ -13,7 +13,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub use demerits::{Break, Error, INFINITY, Item, Params, Stretch, break_lines};
+pub use demerits::{Break, Error, INFINITY, Item, Params, Stretch, break_lines, greedy, ragged};
 
 // ---------------------------------------------------------------------------
 // Building paragraphs
@@ -282,16 +282,12 @@ pub struct Evaluation {
     pub fitness: Vec<u8>,
 }
 
-/// Score a set of breaks, or say exactly which rule it breaks.
-pub fn evaluate(
-    items: &[Item],
-    widths: &[i64],
-    params: &Params,
-    breaks: &[usize],
-) -> Result<Evaluation, String> {
-    let mut ev = Evaluation { demerits: 0.0, ratios: Vec::new(), fitness: Vec::new() };
+/// Check that a set of breaks lays out the paragraph legally: legal breaks,
+/// every forced break taken, the last item last, and no line ending inside a
+/// discarded run. Says nothing about how the lines fit.
+pub fn check_layout(items: &[Item], breaks: &[usize]) -> Result<(), String> {
     if items.is_empty() {
-        return if breaks.is_empty() { Ok(ev) } else { Err("an empty paragraph has no lines".into()) };
+        return if breaks.is_empty() { Ok(()) } else { Err("an empty paragraph has no lines".into()) };
     }
     let n = items.len();
     if breaks.last() != Some(&(n - 1)) {
@@ -311,7 +307,6 @@ pub fn evaluate(
         }
     }
     let mut previous: Option<usize> = None;
-    let mut previous_fitness = 1;
     for (k, &b) in breaks.iter().enumerate() {
         let s = line_start(items, previous);
         if b < s {
@@ -319,6 +314,24 @@ pub fn evaluate(
                 "line {k} would break at {b}, inside the run discarded after the break at {previous:?} (it starts at {s})"
             ));
         }
+        previous = Some(b);
+    }
+    Ok(())
+}
+
+/// Score a set of breaks, or say exactly which rule it breaks.
+pub fn evaluate(
+    items: &[Item],
+    widths: &[i64],
+    params: &Params,
+    breaks: &[usize],
+) -> Result<Evaluation, String> {
+    let mut ev = Evaluation { demerits: 0.0, ratios: Vec::new(), fitness: Vec::new() };
+    check_layout(items, breaks)?;
+    let mut previous: Option<usize> = None;
+    let mut previous_fitness = 1;
+    for (k, &b) in breaks.iter().enumerate() {
+        let s = line_start(items, previous);
         let w = line_width(widths, k);
         let m = measure(items, s, b);
         let r = ratio(m, w);
@@ -509,10 +522,52 @@ pub fn oracle(items: &[Item], widths: &[i64], params: &Params) -> Expected {
     select(&counts, params.looseness)
 }
 
-/// First fit: each line takes as much as it can without being overfull.
-/// What most text engines do. Its lines may well be infeasible.
-pub fn greedy(items: &[Item], widths: &[i64]) -> Vec<usize> {
+// ---------------------------------------------------------------------------
+// First fit
+
+/// One of the two first-fit breakers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fit {
+    Greedy,
+    Ragged,
+}
+
+impl Fit {
+    pub const BOTH: [Fit; 2] = [Fit::Greedy, Fit::Ragged];
+
+    /// Run the breaker itself.
+    pub fn run(self, items: &[Item], widths: &[i64]) -> Result<Vec<Break>, Error> {
+        match self {
+            Fit::Greedy => greedy(items, widths),
+            Fit::Ragged => ragged(items, widths),
+        }
+    }
+
+    /// Whether a line measured `m` fits in `width`.
+    pub fn fits(self, m: Measure, width: i64) -> bool {
+        match self {
+            Fit::Greedy => ratio(m, width) >= -1.0,
+            Fit::Ragged => m.natural <= width,
+        }
+    }
+
+    /// The ratio the breaker reports for that line.
+    pub fn reported(self, m: Measure, width: i64) -> f64 {
+        match self {
+            Fit::Greedy => ratio(m, width),
+            Fit::Ragged => 0.0,
+        }
+    }
+}
+
+/// First fit, read straight off the contract. Every candidate line is
+/// measured from scratch, so it's slow, and hard to get wrong.
+pub fn first_fit(items: &[Item], widths: &[i64], fit: Fit) -> Vec<usize> {
     let mut out = Vec::new();
+    if items.is_empty() {
+        return out;
+    }
+    assert!(items.last().is_some_and(is_forced), "first fit needs a terminated paragraph");
     let mut previous = None;
     loop {
         let s = line_start(items, previous);
@@ -522,12 +577,12 @@ pub fn greedy(items: &[Item], widths: &[i64]) -> Vec<usize> {
             if !is_legal_break(items, b) {
                 continue;
             }
-            let m = measure(items, s, b);
-            if m.natural - m.shrink > w && chosen.is_some() {
+            let fits = fit.fits(measure(items, s, b), w);
+            if !fits && chosen.is_some() {
                 break;
             }
             chosen = Some(b);
-            if is_forced(&items[b]) {
+            if !fits || is_forced(&items[b]) {
                 break;
             }
         }
@@ -538,6 +593,57 @@ pub fn greedy(items: &[Item], widths: &[i64]) -> Vec<usize> {
         }
         previous = Some(b);
     }
+}
+
+/// Run a first-fit breaker and hold it to everything: a legal layout, the
+/// same breaks as [`first_fit`], the ratios bit for bit, and, line by line,
+/// first fit's own promises. Returns what it got.
+pub fn check_first_fit(items: &[Item], widths: &[i64], fit: Fit) -> Vec<Break> {
+    let ctx = || format!("{fit:?}, {}", repro_layout(items, widths));
+    let got = fit.run(items, widths).unwrap_or_else(|e| panic!("got Err({e:?})\n{}", ctx()));
+    let at: Vec<usize> = got.iter().map(|b| b.position).collect();
+    if let Err(e) = check_layout(items, &at) {
+        panic!("{e}\n{}", ctx());
+    }
+    let mut previous = None;
+    for (k, b) in got.iter().enumerate() {
+        let (s, e) = (line_start(items, previous), b.position);
+        let w = line_width(widths, k);
+        let m = measure(items, s, e);
+        let want = fit.reported(m, w);
+        assert!(
+            b.ratio.to_bits() == want.to_bits(),
+            "line {k} ({s}..={e}) reports ratio {:?}, but its ratio is {want:?}\n{}",
+            b.ratio,
+            ctx()
+        );
+        let candidates: Vec<usize> = (s..e).filter(|&c| is_legal_break(items, c)).collect();
+        for &c in &candidates {
+            assert!(
+                fit.fits(measure(items, s, c), w),
+                "line {k} ({s}..={e}) is too long already at {c}, so it should have ended sooner\n{}",
+                ctx()
+            );
+        }
+        let fits = fit.fits(m, w);
+        assert!(
+            fits || candidates.is_empty(),
+            "line {k} ({s}..={e}) is too long, and it could have ended at {candidates:?}\n{}",
+            ctx()
+        );
+        if fits && !is_forced(&items[e]) {
+            let next = (e + 1..items.len()).find(|&c| is_legal_break(items, c)).expect("a later break");
+            assert!(
+                !fit.fits(measure(items, s, next), w),
+                "line {k} ({s}..={e}) ends too soon: it still fits at {next}\n{}",
+                ctx()
+            );
+        }
+        previous = Some(e);
+    }
+    let want = first_fit(items, widths, fit);
+    assert_eq!(at, want, "first fit breaks at {want:?}\n{}", ctx());
+    got
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +713,20 @@ pub fn repro(items: &[Item], widths: &[i64], params: &Params) -> String {
     fn num(x: f64) -> String {
         if x == f64::INFINITY { "f64::INFINITY".into() } else { format!("{x:?}") }
     }
+    let mut s = repro_layout(items, widths);
+    s += &format!(
+        "    let params = Params {{ tolerance: {}, line_penalty: {}, flagged_demerits: {}, fitness_demerits: {}, looseness: {} }};\n",
+        num(params.tolerance),
+        num(params.line_penalty),
+        num(params.flagged_demerits),
+        num(params.fitness_demerits),
+        params.looseness
+    );
+    s
+}
+
+/// The items and widths of [`repro`], without the parameters.
+pub fn repro_layout(items: &[Item], widths: &[i64]) -> String {
     fn int(x: i64) -> String {
         match x {
             i64::MIN => "i64::MIN".into(),
@@ -636,14 +756,6 @@ pub fn repro(items: &[Item], widths: &[i64], params: &Params) -> String {
     s += "];\n";
     let ws: Vec<String> = widths.iter().map(|w| int(*w)).collect();
     s += &format!("    let widths = [{}];\n", ws.join(", "));
-    s += &format!(
-        "    let params = Params {{ tolerance: {}, line_penalty: {}, flagged_demerits: {}, fitness_demerits: {}, looseness: {} }};\n",
-        num(params.tolerance),
-        num(params.line_penalty),
-        num(params.flagged_demerits),
-        num(params.fitness_demerits),
-        params.looseness
-    );
     s
 }
 

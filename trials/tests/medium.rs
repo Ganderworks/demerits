@@ -35,7 +35,8 @@ fn it_beats_greedy() {
         }
         let ours = break_lines(&items, &widths, &params).unwrap();
         let ours = validate(&items, &widths, &params, &ours).unwrap().demerits;
-        match evaluate(&items, &widths, &params, &greedy(&items, &widths)) {
+        let theirs: Vec<usize> = greedy(&items, &widths).unwrap().iter().map(|b| b.position).collect();
+        match evaluate(&items, &widths, &params, &theirs) {
             Ok(g) if close(g.demerits, ours) => {}
             _ => beaten.push(width),
         }
