@@ -256,6 +256,17 @@ pub enum Error {
     Unterminated,
 }
 
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Error::Infeasible => "no set of breaks makes every line feasible",
+            Error::Unterminated => "the paragraph doesn't end with a forced break",
+        })
+    }
+}
+
+impl std::error::Error for Error {}
+
 pub struct Node {}
 
 pub trait LineBreaker {
