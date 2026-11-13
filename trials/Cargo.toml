@@ -11,7 +11,7 @@ demerits = { path = ".." }
 # Each level turns on the ones below it. `default` is the level you're on:
 # move it up one when you pass.
 [features]
-default = ["nitpicking"]
+default = ["neptune"]
 easy = []
 medium = ["easy"]
 hard = ["medium"]

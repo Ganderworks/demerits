@@ -199,33 +199,47 @@ pub fn break_lines(
 /// Pick the final node: the fewest demerits, or with `looseness` the line
 /// count closest to it that has a solution.
 fn choose(lists: &Lists, looseness: i32) -> Option<usize> {
-    // On ties, the first: always the same one for the same input.
-    let fewest = |line: Option<usize>| {
-        let mut best: Option<usize> = None;
-        for &k in &lists.active {
-            let node = &lists.nodes[k];
-            if line.is_some_and(|l| node.line != l) {
-                continue;
-            }
-            if best.is_none_or(|b| node.t_demerits < lists.nodes[b].t_demerits) {
-                best = Some(k);
-            }
+    // The optimum: fewest demerits, and on a tie the fewest lines. Always the
+    // same one for the same input.
+    let mut optimum: Option<usize> = None;
+    for &k in &lists.active {
+        let node = &lists.nodes[k];
+        let better = optimum.is_none_or(|b| {
+            let best = &lists.nodes[b];
+            node.t_demerits < best.t_demerits
+                || (node.t_demerits == best.t_demerits && node.line < best.line)
+        });
+        if better {
+            optimum = Some(k);
         }
-        best
-    };
-    let optimum = fewest(None)?;
-    let n = lists.nodes[optimum].line as i64;
-    let step = -(looseness.signum() as i64);
-    let mut d = looseness as i64;
-    while d != 0 {
-        if n + d >= 1 {
-            if let Some(k) = fewest(Some((n + d) as usize)) {
-                return Some(k);
-            }
-        }
-        d += step;
     }
-    Some(optimum)
+    let optimum = optimum?;
+    if looseness == 0 {
+        return Some(optimum);
+    }
+
+    // One pass over the line counts that exist, rather than every integer
+    // between n and n + looseness: the farthest from n on looseness's side,
+    // then the fewest demerits there, then the first seen.
+    let n = lists.nodes[optimum].line as i64;
+    let l = looseness as i64;
+    let mut chosen = optimum;
+    let mut chosen_d = 0i64;
+    for &k in &lists.active {
+        let node = &lists.nodes[k];
+        let d = node.line as i64 - n;
+        let within = if l > 0 { 0 <= d && d <= l } else { l <= d && d <= 0 };
+        if !within {
+            continue;
+        }
+        let better = d.abs() > chosen_d.abs()
+            || (d == chosen_d && node.t_demerits < lists.nodes[chosen].t_demerits);
+        if better {
+            chosen = k;
+            chosen_d = d;
+        }
+    }
+    Some(chosen)
 }
 
 /// Try every active node against a legal break at `b`: record the best way
