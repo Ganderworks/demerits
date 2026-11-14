@@ -9,7 +9,7 @@ repository = "https://github.com/Ganderworks/demerits"
 readme = "README.md"
 keywords = ["typesetting", "line-breaking", "knuth-plass", "justification", "hyphenation"]
 categories = ["text-processing"]
-exclude = [".cargo/**/*", ".github/**/*", "assets/**/*"]
+exclude = [".cargo/**/*", ".github/**/*", "assets/imgs/**/*"]
 
 [dependencies]
 

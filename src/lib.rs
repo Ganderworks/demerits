@@ -170,14 +170,188 @@
 //! The Proof, that is, of the three modes. Ragged does not compare side by side, it's doing its own
 //! thing, so we use an inherently unjustified text like Dante's epic medieval classic, The Divine Comedy.
 //!
-//! [Pictured bottom right: a typography student who full justified verse based poetry]
-//! (https://raw.githubusercontent.com/Ganderworks/demerits/v0.1.0/assets/imgs/dante.jpg")
+//! ![Pictured bottom right: a typography student who full justified verse based poetry](https://raw.githubusercontent.com/Ganderworks/demerits/v0.1.0/assets/imgs/dante.jpg)
 //!
+//! ```
+//! use demerits::{Break, INFINITY, Item, Params, Stretch, break_lines, greedy};
 //!
+//! // A monospaced font, one unit per character. Each word is a box and each
+//! // space is glue that can stretch to twice its width but not shrink. The
+//! // paragraph ends as TeX's do: glue that fills the last line, then a forced
+//! // break.
+//! fn paragraph(text: &str) -> (Vec<&str>, Vec<Item>) {
+//!     let words: Vec<&str> = text.split_whitespace().collect();
+//!     let mut items = Vec::new();
+//!     for (i, word) in words.iter().enumerate() {
+//!         if i > 0 {
+//!             items.push(Item::Glue { width: 1, stretch: Stretch::Finite(1), shrink: 0 });
+//!         }
+//!         items.push(Item::Box { width: word.chars().count() as i64 });
+//!     }
+//!     items.push(Item::Glue { width: 0, stretch: Stretch::Infinite, shrink: 0 });
+//!     items.push(Item::Penalty { width: 0, cost: -INFINITY, flagged: false });
+//!     (words, items)
+//! }
 //!
+//! // Set each line's words, sharing its spare room among its spaces, with the
+//! // line's adjustment ratio alongside. Word `i` is item `2 * i`, so a break at
+//! // item `b` ends the line before word `(b + 1) / 2`.
+//! fn set(words: &[&str], breaks: &[Break], width: usize) -> Vec<String> {
+//!     let mut start = 0;
+//!     breaks
+//!         .iter()
+//!         .enumerate()
+//!         .map(|(k, b)| {
+//!             let end = (b.position + 1) / 2;
+//!             let line = &words[start..end];
+//!             start = end;
+//!             let letters: usize = line.iter().map(|w| w.chars().count()).sum();
+//!             let gaps = line.len() - 1;
+//!             let last = k + 1 == breaks.len();
+//!             let spaces = if last || gaps == 0 { gaps } else { width - letters };
+//!             let mut out = String::new();
+//!             for (i, word) in line.iter().enumerate() {
+//!                 if i > 0 {
+//!                     let n = spaces / gaps + usize::from(i <= spaces % gaps);
+//!                     out.extend(std::iter::repeat_n(' ', n));
+//!                 }
+//!                 out.push_str(word);
+//!             }
+//!             format!("|{out:<width$}| {:.2}", b.ratio)
+//!         })
+//!         .collect()
+//! }
 //!
+//! let frog_king = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/frog_king.txt"));
+//! let (words, items) = paragraph(frog_king);
 //!
+//! // First fit: each line takes all it can, whatever that leaves the next.
+//! let first_fit = set(&words, &greedy(&items, &[40])?, 40);
 //!
+//! // Knuth–Plass: the fewest demerits over the whole paragraph.
+//! let optimal = set(&words, &break_lines(&items, &[40], &Params::default())?, 40);
+//!
+//! assert_eq!(first_fit, [
+//!     "|In olden times when wishing still helped| 0.00",
+//!     "|one,  there lived a king whose daughters| 0.17",
+//!     "|were all beautiful; and the youngest was| 0.00",
+//!     "|so  beautiful that the sun itself, which| 0.17",
+//!     "|has   seen   so   much,  was  astonished| 1.60",
+//!     "|whenever  it shone in her face. Close by| 0.14",
+//!     "|the  King's  castle  lay  a  great  dark| 1.00",
+//!     "|forest,  and  under  an old lime-tree in| 0.50",
+//!     "|the  forest was a well, and when the day| 0.12",
+//!     "|was very warm, the king's child went out| 0.00",
+//!     "|into the forest and sat down by the side| 0.00",
+//!     "|of  the  cool fountain; and when she was| 0.29",
+//!     "|bored  she took a golden ball, and threw| 0.14",
+//!     "|it  up  on  high and caught it; and this| 0.38",
+//!     "|ball was her favorite plaything.        | 0.00",
+//! ]);
+//!
+//! assert_eq!(optimal, [
+//!     "|In olden times when wishing still helped| 0.00",
+//!     "|one,  there lived a king whose daughters| 0.17",
+//!     "|were  all  beautiful;  and  the youngest| 0.80",
+//!     "|was  so  beautiful  that the sun itself,| 0.50",
+//!     "|which  has  seen so much, was astonished| 0.33",
+//!     "|whenever  it  shone  in  her face. Close| 0.67",
+//!     "|by  the  King's  castle lay a great dark| 0.43",
+//!     "|forest,  and  under  an old lime-tree in| 0.50",
+//!     "|the  forest was a well, and when the day| 0.12",
+//!     "|was very warm, the king's child went out| 0.00",
+//!     "|into the forest and sat down by the side| 0.00",
+//!     "|of  the  cool fountain; and when she was| 0.29",
+//!     "|bored  she took a golden ball, and threw| 0.14",
+//!     "|it  up  on  high and caught it; and this| 0.38",
+//!     "|ball was her favorite plaything.        | 0.00",
+//! ]);
+//! # Ok::<(), demerits::Error>(())
+//! ```
+//!
+//! ```
+//! use demerits::{INFINITY, Item, Stretch, ragged};
+//! # fn paragraph(text: &str) -> (Vec<&str>, Vec<Item>) {
+//! #     let words: Vec<&str> = text.split_whitespace().collect();
+//! #     let mut items = Vec::new();
+//! #     for (i, word) in words.iter().enumerate() {
+//! #         if i > 0 {
+//! #             items.push(Item::Glue { width: 1, stretch: Stretch::Finite(1), shrink: 0 });
+//! #         }
+//! #         items.push(Item::Box { width: word.chars().count() as i64 });
+//! #     }
+//! #     items.push(Item::Glue { width: 0, stretch: Stretch::Infinite, shrink: 0 });
+//! #     items.push(Item::Penalty { width: 0, cost: -INFINITY, flagged: false });
+//! #     (words, items)
+//! # }
+//!
+//! let dante = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/dante.txt"));
+//!
+//! // Each verse is its own paragraph, the same `paragraph` as above, and keeps
+//! // its indent. A verse too long for the measure turns over onto a line
+//! // indented deeper than any verse, so the turnover can't pass for a verse.
+//! const WIDTH: usize = 48;
+//! const TURNOVER: usize = 8;
+//! let mut verses = Vec::new();
+//! for verse in dante.lines() {
+//!     let indent = verse.len() - verse.trim_start().len();
+//!     let (words, items) = paragraph(verse);
+//!     let widths = [(WIDTH - indent) as i64, (WIDTH - TURNOVER) as i64];
+//!     let mut start = 0;
+//!     for (k, b) in ragged(&items, &widths)?.iter().enumerate() {
+//!         let end = (b.position + 1) / 2;
+//!         let pad = if k == 0 { indent } else { TURNOVER };
+//!         verses.push(format!("{:pad$}{}", "", words[start..end].join(" ")));
+//!         start = end;
+//!     }
+//! }
+//!
+//! assert_eq!(verses, [
+//!     "But with clear utterance and language plain",
+//!     "    That fatherly affection made reply,",
+//!     "    In his own smile withdrawn and shown again:",
+//!     "\"Contingency, which is embounded by",
+//!     "    The volume of your matter, is beheld",
+//!     "    All pictured forth before the Eternal Eye,",
+//!     "Yet not thence of necessity compelled,",
+//!     "    More than the vessel down the current",
+//!     "        steering",
+//!     "    Is by the mirror in the eye propelled.",
+//!     "Therefrom comes, even as comes upon the hearing",
+//!     "    Sweet organ music, to my sight the course",
+//!     "    Of time already now for thee preparing.",
+//!     "As through stepmother proof to all remorse",
+//!     "    Hippolytus from Athens fled of old,",
+//!     "    So out of Florence shalt thou go perforce.",
+//!     "Already this is willed and sought,—nay hold",
+//!     "    It good as done by him who plans thy fall",
+//!     "    Where every day the Christ is bought and",
+//!     "        sold.",
+//!     "The hue and cry will hound as usual",
+//!     "    The party wronged; and yet shall vengeance",
+//!     "        give",
+//!     "    A witness to the truth dispensing all.",
+//!     "Thou art to forfeit as a fugitive",
+//!     "    All held most dear: of arrows thou must",
+//!     "        bear,",
+//!     "    This first the bow of banishment lets drive.",
+//!     "Thou shalt make proof what salt and bitter fare",
+//!     "    Is bread of others, and what toils attend",
+//!     "    The going up and down another's stair.",
+//!     "But what will heaviest thy shoulders bend",
+//!     "    Will be the senseless company malign",
+//!     "    With whom thou wilt to such a pass descend,",
+//!     "Who, ingrate all and maddened, will combine",
+//!     "    In fury against thee; but thereafter soon",
+//!     "    Their forehead will be red for it, not",
+//!     "        thine.",
+//!     "Their brutishness will in their very own",
+//!     "    Deeds be avoucht, nor will thy fame be",
+//!     "        blurred",
+//!     "    In having made a party all alone.",
+//! ]);
+//! # Ok::<(), demerits::Error>(())
+//! ```
 
 #![forbid(unsafe_code)]
 
@@ -188,14 +362,6 @@ pub use first_fit::{greedy, ragged};
 /// A penalty `cst` at or above this never breaks; at or below its negative,
 /// always breaks.
 pub const INFINITY: i64 = 10_000;
-
-fn typeset() {
-    const PT = 1000;
-    let dante = include_str!("../assets/dante.txt");
-    for ()
-    let dante_typeset = ragged(dante, 50 * PT );
-
-}
 
 /// One element of a paragraph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
