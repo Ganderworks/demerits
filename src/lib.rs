@@ -164,6 +164,20 @@
 //!
 //! Both take time in proportion to the number of items, however long the
 //! lines, and don't recurse.
+//!
+//! # The Pudding
+//!
+//! The Proof, that is, of the three modes. Ragged does not compare side by side, it's doing its own
+//! thing, so we use an inherently unjustified text like Dante's epic medieval classic, The Divine Comedy.
+//!
+//! [Pictured bottom right: a typography student who full justified verse based poetry]
+//! (https://raw.githubusercontent.com/Ganderworks/demerits/v0.1.0/assets/imgs/dante.jpg")
+//!
+//!
+//!
+//!
+//!
+//!
 
 #![forbid(unsafe_code)]
 
@@ -171,9 +185,17 @@ mod first_fit;
 
 pub use first_fit::{greedy, ragged};
 
-/// A penalty `cost` at or above this never breaks; at or below its negative,
+/// A penalty `cst` at or above this never breaks; at or below its negative,
 /// always breaks.
 pub const INFINITY: i64 = 10_000;
+
+fn typeset() {
+    const PT = 1000;
+    let dante = include_str!("../assets/dante.txt");
+    for ()
+    let dante_typeset = ragged(dante, 50 * PT );
+
+}
 
 /// One element of a paragraph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -266,8 +288,6 @@ impl core::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
-
-pub struct Node {}
 
 pub trait LineBreaker {
     fn break_lines(&self, items: &[Item], line_widths: &[i64]) -> Result<Vec<Break>, Error>;

@@ -26,14 +26,14 @@ crate docs at the top of [`src/lib.rs`](src/lib.rs).
 
 The tests live in [`trials/`](trials), an unpublished crate, in six levels:
 
-| Level | File | What it asks |
-|---|---|---|
-| easy | `tests/easy.rs` | Does it break lines at all? |
-| medium | `tests/medium.rs` | Is it really Knuth–Plass, or greedy in a nice coat? |
-| hard | `tests/hard.rs` | Hyphens, fitness classes, line shapes and looseness. |
-| very hard | `tests/very_hard.rs` | Thousands of random paragraphs against the oracle. |
-| nitpicking | `tests/nitpicking.rs` | Every rule in the contract, at its edges. |
-| neptune | `tests/neptune.rs` | You have angered Neptune. |
+| Level      | File                  | What it asks                                                                          |
+| ---------- | --------------------- | ------------------------------------------------------------------------------------- |
+| easy       | `tests/easy.rs`       | Does it break lines at all?                                                           |
+| medium     | `tests/medium.rs`     | Is it really Knuth–Plass, or greedy in a nice coat?                                   |
+| hard       | `tests/hard.rs`       | Hyphens, fitness classes, line shapes and looseness.                                  |
+| very hard  | `tests/very_hard.rs`  | Thousands of random paragraphs against the oracle.                                    |
+| nitpicking | `tests/nitpicking.rs` | Every rule in the contract, at its edges.                                             |
+| neptune    | `tests/neptune.rs`    | You have angered Neptune, god of the sea, and you must withstand a monumental ordeal. |
 
 Run the current level:
 
@@ -66,23 +66,6 @@ dynamic program is itself checked against brute force on every run. First fit
 is judged by a slow version that measures every line from scratch, and by
 first fit's promises checked line by line.
 
-## Sketching in Python
-
-[`python/`](python) has the same interface in Python, for getting the
-algorithm right before writing it in Rust: a stub in `demerits.py`, and easy
-and medium ported to `unittest`, with the same judges and the same random
-paragraphs (the generator is the same SplitMix64, so a seed makes the same
-paragraph in both). It needs nothing but Python 3.10 or later.
-
-```sh
-python3 python/run.py           # the current level
-python3 python/run.py medium    # peek at the next
-```
-
-Raise `LEVEL` at the top of `python/run.py` when you pass. The Python
-differences from the contract (exceptions instead of `Err`, `INFINITE` for
-infinite stretch) are at the top of `demerits.py`.
-
 ## License
 
-MIT
+[MIT](LICENSE)

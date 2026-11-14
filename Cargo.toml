@@ -3,11 +3,13 @@ name = "demerits"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 description = "Deterministic Knuth–Plass line breaking"
 repository = "https://github.com/Ganderworks/demerits"
+readme = "README.md"
 keywords = ["typesetting", "line-breaking", "knuth-plass", "justification", "hyphenation"]
 categories = ["text-processing"]
+exclude = [".cargo/**/*", ".github/**/*", "assets/**/*"]
 
 [dependencies]
 
